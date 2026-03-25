@@ -11,13 +11,26 @@ import * as path from 'path';
 const TEMP_DIR = process.platform === 'win32' ? os.tmpdir() : '/tmp';
 
 export function validateOutputPath(outputPath: string): string {
-  const allowedDir = process.env.PILOT_OUTPUT_DIR || os.tmpdir();
-  const resolved = path.resolve(outputPath);
-  const normalizedAllowed = path.resolve(allowedDir);
-  if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
-    throw new Error(`Output path must be within ${allowedDir}, got: ${outputPath}`);
+  const allowed = process.env.PILOT_OUTPUT_DIR || os.tmpdir();
+  const normalizedAllowed = path.resolve(allowed);
+  try {
+    const parentDir = path.dirname(outputPath);
+    const realParent = fs.realpathSync(parentDir);
+    const resolved = path.resolve(realParent, path.basename(outputPath));
+    if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
+      throw new Error(`Output path must be within ${normalizedAllowed}: ${outputPath}`);
+    }
+    return resolved;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Output path must be within')) {
+      throw err;
+    }
+    const resolved = path.resolve(outputPath);
+    if (!resolved.startsWith(normalizedAllowed + path.sep) && resolved !== normalizedAllowed) {
+      throw new Error(`Output path must be within ${normalizedAllowed}: ${outputPath}`);
+    }
+    return resolved;
   }
-  return resolved;
 }
 
 async function getCleanText(page: import('playwright').Page): Promise<string> {
