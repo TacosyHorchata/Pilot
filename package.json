@@ -1,0 +1,57 @@
+{
+  "name": "pilot",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Fast browser automation MCP server for LLMs — persistent Chromium, ref-based interaction, cookie migration",
+  "bin": {
+    "pilot": "dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "files": [
+    "dist",
+    "scripts/postinstall.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.0.0",
+    "diff": "^7.0.0",
+    "playwright": "^1.52.0",
+    "zod": "^3.25.0"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "browser-automation",
+    "playwright",
+    "claude",
+    "cursor",
+    "ai-agent",
+    "headless-browser",
+    "web-automation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TacosyHorchata/pilot.git"
+  },
+  "homepage": "https://github.com/TacosyHorchata/pilot",
+  "author": "Pedro Rios",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/diff": "^7.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
