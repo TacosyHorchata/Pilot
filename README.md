@@ -18,18 +18,19 @@ Every call after: ~5-50ms
 | **Latency/action** | ~5-50ms | ~100-200ms | ~150-300ms |
 | **Architecture** | In-process stdio | Separate process | Chrome extension |
 | **Persistent browser** | Yes | Per-session | Yes |
-| **Tools** | 48 | 25+ | ~20 |
+| **Tools** | 51 (configurable profiles) | 25+ | ~20 |
+| **Token control** | `max_elements`, `structure_only`, `interactive_only` | No | No |
+| **Iframe support** | Full (list, switch, snapshot inside) | NOT_PLANNED | No |
 | **Cookie import** | Chrome, Arc, Brave, Edge, Comet | No | No |
 | **Snapshot diffing** | Track page changes between actions | No | No |
 | **Handoff/Resume** | Open headed Chrome, interact manually, resume | No | No |
-| **Annotated screenshots** | Ref labels overlaid on screenshot | No | No |
 
 Speed matters when your agent makes hundreds of browser calls in a session. At 100 actions, that's **5 seconds** with pilot vs **20 seconds** with alternatives.
 
 ## Quick Start
 
 ```bash
-npm install -g pilot
+npx pilot-mcp
 npx playwright install chromium
 ```
 
@@ -38,9 +39,9 @@ Add to your Claude Code config (`.mcp.json`):
 ```json
 {
   "mcpServers": {
-    "interact": {
+    "pilot": {
       "command": "npx",
-      "args": ["-y", "pilot"]
+      "args": ["-y", "pilot-mcp"]
     }
   }
 }
@@ -62,7 +63,46 @@ pilot_click   → { ref: "@e1" }
 
 The ref system gives LLMs a simple, reliable way to interact with pages. Stale refs are auto-detected with clear error messages.
 
-## Tools (48)
+## Token Control
+
+Large pages can blow up your context window. Pilot gives you fine-grained control:
+
+```
+pilot_snapshot({ max_elements: 20 })
+→ Returns 20 elements + "614 more elements not shown"
+
+pilot_snapshot({ structure_only: true })
+→ Pure tree structure, no text content
+
+pilot_snapshot({ interactive_only: true, max_elements: 15 })
+→ Only buttons/links/inputs, capped at 15
+```
+
+Combine `max_elements`, `structure_only`, `interactive_only`, `compact`, and `depth` to get exactly the level of detail you need. Start small, expand as needed.
+
+## Tool Profiles
+
+48+ tools can overwhelm LLMs (research shows degradation at 30+ tools). Use `PILOT_PROFILE` to load only what you need:
+
+| Profile | Tools | Use case |
+|---|---|---|
+| `core` | 9 | Simple automation — navigate, snapshot, click, fill, type, press_key, wait, screenshot |
+| `standard` | 25 | Common workflows — core + tabs, scroll, hover, drag, iframe, page reading |
+| `full` | 51 | Everything (default) |
+
+```json
+{
+  "mcpServers": {
+    "pilot": {
+      "command": "npx",
+      "args": ["-y", "pilot-mcp"],
+      "env": { "PILOT_PROFILE": "standard" }
+    }
+  }
+}
+```
+
+## Tools (51)
 
 ### Navigation
 | Tool | Description |
@@ -75,7 +115,7 @@ The ref system gives LLMs a simple, reliable way to interact with pages. Stale r
 ### Snapshots
 | Tool | Description |
 |------|-------------|
-| `pilot_snapshot` | Accessibility tree with `@eN` refs for element selection. Use `include_cursor_interactive` for non-ARIA clickable elements (`@cN` refs). |
+| `pilot_snapshot` | Accessibility tree with `@eN` refs. Supports `max_elements`, `structure_only`, `interactive_only`, `compact`, `depth`. |
 | `pilot_snapshot_diff` | Unified diff showing what changed since last snapshot |
 | `pilot_annotated_screenshot` | Screenshot with red overlay boxes at each `@ref` position |
 
@@ -92,6 +132,15 @@ The ref system gives LLMs a simple, reliable way to interact with pages. Stale r
 | `pilot_scroll` | Scroll element into view or scroll page |
 | `pilot_wait` | Wait for element visibility, network idle, or page load |
 | `pilot_file_upload` | Upload files to a file input |
+
+### Iframes
+| Tool | Description |
+|------|-------------|
+| `pilot_frames` | List all frames (iframes) on the page |
+| `pilot_frame_select` | Switch context into an iframe by index or name |
+| `pilot_frame_reset` | Switch back to the main frame |
+
+After switching frames, `pilot_snapshot`, `pilot_click`, `pilot_fill`, and all interaction tools operate inside that iframe. Use `pilot_frames` to discover available iframes, then `pilot_frame_select` to enter one.
 
 ### Page Inspection
 | Tool | Description |
@@ -188,7 +237,7 @@ pilot runs Playwright **in the same process** as the MCP server. No HTTP layer, 
 │  Your AI Agent (Claude Code, Cursor, etc.)      │
 │                                                 │
 │  ┌──────────────┐    stdio     ┌─────────────┐ │
-│  │  MCP Client  │◄───────────►│ pilot │ │
+│  │  MCP Client  │◄───────────►│    pilot     │ │
 │  └──────────────┘              │              │ │
 │                                │  Playwright  │ │
 │                                │  (in-proc)   │ │
