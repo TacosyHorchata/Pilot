@@ -79,7 +79,6 @@ export class BrowserManager {
 
     const launchOptions: Parameters<typeof chromium.launch>[0] = {
       headless: true,
-      channel: 'chromium',
       ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
     };
 
@@ -531,7 +530,6 @@ export class BrowserManager {
     const handoffOptions: Parameters<typeof chromium.launch>[0] = {
       headless: false,
       timeout: 15000,
-      channel: 'chromium',
       ...(handoffArgs.length > 0 ? { args: handoffArgs } : {}),
     };
 
