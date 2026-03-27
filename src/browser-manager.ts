@@ -72,16 +72,21 @@ export class BrowserManager {
   }
 
   async launch(): Promise<void> {
-    const launchArgs: string[] = [];
-    if (process.env.CI || process.env.CONTAINER) {
-      launchArgs.push('--no-sandbox');
+    const isLinux = process.platform === 'linux';
+    const launchArgs: string[] = isLinux
+      ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      : [];
+
+    const launchOptions: Parameters<typeof chromium.launch>[0] = {
+      headless: true,
+      ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
+    };
+
+    if (isLinux && process.env.PILOT_CHROMIUM_PATH) {
+      launchOptions.executablePath = process.env.PILOT_CHROMIUM_PATH;
     }
 
-    this.browser = await chromium.launch({
-      headless: true,
-      chromiumSandbox: process.platform !== 'win32',
-      ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
-    });
+    this.browser = await chromium.launch(launchOptions);
 
     this.browser.on('disconnected', () => {
       console.error('[pilot] FATAL: Chromium process crashed or was killed.');
@@ -517,12 +522,23 @@ export class BrowserManager {
     const currentUrl = this.getCurrentUrl();
 
     let newBrowser: Browser;
+    const isLinux = process.platform === 'linux';
+    const handoffArgs = isLinux
+      ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      : [];
+
+    const handoffOptions: Parameters<typeof chromium.launch>[0] = {
+      headless: false,
+      timeout: 15000,
+      ...(handoffArgs.length > 0 ? { args: handoffArgs } : {}),
+    };
+
+    if (isLinux && process.env.PILOT_CHROMIUM_PATH) {
+      handoffOptions.executablePath = process.env.PILOT_CHROMIUM_PATH;
+    }
+
     try {
-      newBrowser = await chromium.launch({
-        headless: false,
-        timeout: 15000,
-        chromiumSandbox: process.platform !== 'win32',
-      });
+      newBrowser = await chromium.launch(handoffOptions);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       return `ERROR: Cannot open headed browser — ${msg}. Headless browser still running.`;
