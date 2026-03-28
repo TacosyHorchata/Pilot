@@ -81,7 +81,7 @@ Use when the user wants to transfer authentication state from their real browser
 
 Parameters:
 - browser: Browser name to import from — "chrome", "arc", "brave", "edge", or "comet". Auto-detects if omitted
-- domains: Array of cookie domains to import (e.g., [".github.com", ".google.com"]). Required for import mode
+- domains: Array of cookie domains to import (e.g., [".github.com", ".google.com"]). Omit to import ALL cookies (up to max_cookies)
 - profile: Browser profile name to read cookies from (default: "Default"). Use list_profiles to see available profiles
 - list_browsers: Set to true to list installed Chromium browsers on the system instead of importing
 - list_profiles: Set to true with browser to list available profiles for that browser
@@ -100,13 +100,14 @@ Errors:
 - Decryption failures: Some cookies may fail to decrypt (e.g., on Linux without keyring access). The count is reported.`,
       {
       browser: z.string().optional().describe('Browser name (chrome, arc, brave, edge, comet). Auto-detects if omitted.'),
-      domains: z.array(z.string()).describe('Cookie domains to import (e.g. [".github.com", ".google.com"])'),
+      domains: z.array(z.string()).optional().describe('Cookie domains to import (e.g. [".github.com"]). Omit to import ALL cookies.'),
+      max_cookies: z.number().optional().describe('Max cookies to import when domains is omitted (default: 500)'),
       profile: z.string().optional().describe('Browser profile name (default: "Default")'),
       list_browsers: z.boolean().optional().describe('List installed browsers instead of importing'),
       list_profiles: z.boolean().optional().describe('List available profiles for the specified browser'),
       list_domains: z.boolean().optional().describe('List cookie domains available in the browser'),
     },
-    async ({ browser, domains, profile, list_browsers, list_profiles, list_domains: listDom }) => {
+    async ({ browser, domains, max_cookies, profile, list_browsers, list_profiles, list_domains: listDom }) => {
       try {
         if (list_browsers) {
           const installed = findInstalledBrowsers();
@@ -133,7 +134,7 @@ Errors:
         // Import mode
         await bm.ensureBrowser();
         const browserName = browser || 'chrome';
-        const result = await importCookies(browserName, domains, profile || 'Default');
+        const result = await importCookies(browserName, domains || [], profile || 'Default', max_cookies || 500);
 
         if (result.cookies.length > 0) {
           await bm.getContext().addCookies(result.cookies as any);
@@ -235,6 +236,63 @@ Errors: None — this is a configuration-only call that always succeeds.`,
         ? (prompt_text ? `Dialogs will be accepted with text: "${prompt_text}"` : 'Dialogs will be accepted')
         : 'Dialogs will be dismissed';
       return { content: [{ type: 'text' as const, text: msg }] };
+    }
+  );
+
+  server.tool(
+    'pilot_extension_status',
+    `Check if the Pilot Chrome extension is connected and routing commands through the user's real browser.
+When connected, all navigation, snapshot, click, fill, type, scroll, screenshot, and tab commands route through Chrome — bypassing Cloudflare and bot detection.
+
+Parameters: (none)
+
+Returns: Connection status, port, and instructions for installing the extension if not connected.`,
+    {},
+    async () => {
+      const { extensionServer } = await import('../extension-server.js');
+      const connected = extensionServer.isConnected();
+      const mode = extensionServer.getMode();
+      const session = extensionServer.getSessionId().slice(0, 8);
+      const tab = extensionServer.getSessionTab();
+      const clients = extensionServer.getClientCount();
+
+      if (connected) {
+        let status = `Extension connected ✓\nMode: ${mode} | Session: ${session}`;
+        if (tab) status += ` | Tab: ${tab}`;
+        if (mode === 'broker' && clients > 0) status += ` | Other sessions: ${clients}`;
+        return { content: [{ type: 'text' as const, text: status }] };
+      }
+      return { content: [{ type: 'text' as const, text: `Extension not connected (mode: ${mode}, session: ${session}).\n\nTo use the Pilot extension:\n1. Open Chrome → chrome://extensions → Enable Developer Mode\n2. Load unpacked → select the "extension/" folder in the Pilot repo\n3. The extension auto-connects to ws://127.0.0.1:3131` }] };
+    }
+  );
+
+  server.tool(
+    'pilot_cdp',
+    `Connect Pilot to a real Chrome browser already running on the user's machine via Chrome DevTools Protocol (CDP).
+Use when Cloudflare or other bot detection blocks even headed mode. A real Chrome with the user's real profile bypasses fingerprinting entirely.
+
+Parameters:
+- port (optional, default 9222): The remote debugging port Chrome was launched with.
+
+How to start Chrome with CDP enabled:
+  macOS:   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=9222
+  Windows: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222
+  Linux:   google-chrome --remote-debugging-port=9222
+
+Returns: Confirmation of connection with tab count and active URL.
+
+Errors:
+- "Cannot connect": Chrome is not running or not started with the --remote-debugging-port flag.`,
+    {
+      port: z.number().optional().describe('Chrome remote debugging port (default: 9222)'),
+    },
+    async ({ port }) => {
+      try {
+        const result = await bm.connectCDP(port ?? 9222);
+        return { content: [{ type: 'text' as const, text: result }] };
+      } catch (err) {
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
     }
   );
 

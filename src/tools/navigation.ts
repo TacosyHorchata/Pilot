@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { BrowserManager } from '../browser-manager.js';
-import { takeSnapshot } from '../snapshot.js';
+import { takeSnapshot, pageContentPreview } from '../snapshot.js';
 import { wrapError } from '../errors.js';
 import { validateNavigationUrl } from '../url-validation.js';
 
@@ -11,10 +11,13 @@ export function registerNavigationTools(server: McpServer, bm: BrowserManager) {
     `Navigate the browser to a URL and wait for DOM content to load.
 Use when the user wants to go to a specific webpage, URL, or link.
 
+For read tasks ("go to X and tell me Y"), prefer pilot_get — it returns full readable
+content + interactive elements in one call, eliminating a follow-up snapshot call.
+
 Parameters:
 - url: The URL to navigate to (e.g., "https://example.com" or relative paths)
 
-Returns: Confirmation message with the HTTP status code and final URL after redirects.
+Returns: Confirmation message with the HTTP status code, content preview, and interactive elements.
 
 Errors:
 - "Invalid URL": The URL format is malformed. Provide a complete URL including the protocol.
@@ -25,14 +28,23 @@ Errors:
       await bm.ensureBrowser();
       try {
         await validateNavigationUrl(url);
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ url: string }>('navigate', { url });
+          const snap = await ext.send<{ text: string }>('snapshot', { maxElements: 30 });
+          return { content: [{ type: 'text' as const, text: `Navigated to ${res.url}\n--- interactive elements ---\n${snap.text}` }] };
+        }
         const page = bm.getPage();
         const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
         const status = response?.status() || 'unknown';
         bm.resetFailures();
-        // Auto-snapshot so LLM can act immediately without a separate snapshot call
         let snap = '';
         try {
-          snap = '\n--- page state (interactive, top 20) ---\n' + await takeSnapshot(bm, { interactive: true, maxElements: 20, lean: true });
+          const [preview, interactive] = await Promise.all([
+            pageContentPreview(page),
+            takeSnapshot(bm, { interactive: true, maxElements: 30, lean: true }),
+          ]);
+          snap = `\n--- content preview ---\n${preview}\n--- interactive elements ---\n${interactive}`;
         } catch {}
         return { content: [{ type: 'text' as const, text: `Navigated to ${url} (${status})${snap}` }] };
       } catch (err) {
@@ -58,6 +70,11 @@ Errors:
     async () => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ url: string }>('back');
+          return { content: [{ type: 'text' as const, text: `Back → ${res.url}` }] };
+        }
         const page = bm.getPage();
         await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 });
         bm.resetFailures();
@@ -85,6 +102,11 @@ Errors:
     async () => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ url: string }>('forward');
+          return { content: [{ type: 'text' as const, text: `Forward → ${res.url}` }] };
+        }
         const page = bm.getPage();
         await page.goForward({ waitUntil: 'domcontentloaded', timeout: 15000 });
         bm.resetFailures();
@@ -111,10 +133,51 @@ Errors:
     async () => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ url: string }>('reload');
+          return { content: [{ type: 'text' as const, text: `Reloaded ${res.url}` }] };
+        }
         const page = bm.getPage();
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 15000 });
         bm.resetFailures();
         return { content: [{ type: 'text' as const, text: `Reloaded ${page.url()}` }] };
+      } catch (err) {
+        bm.incrementFailures();
+        return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };
+      }
+    }
+  );
+
+  server.tool(
+    'pilot_get',
+    `Navigate to a URL and return its full readable content + interactive elements in one call.
+
+Use this as the primary tool for "go to X and find Y" read tasks. It combines navigation
+and content extraction, eliminating the need for a separate snapshot call.
+
+Parameters:
+- url: The URL to fetch
+
+Returns: Page title, readable body text (up to 1500 chars), and interactive elements.
+         Enough context to answer most read questions without additional tool calls.
+
+Errors:
+- Timeout (15s): The page took too long to load.`,
+    { url: z.string().describe('URL to navigate to') },
+    async ({ url }) => {
+      await bm.ensureBrowser();
+      try {
+        await validateNavigationUrl(url);
+        const page = bm.getPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        bm.resetFailures();
+        const [preview, interactive] = await Promise.all([
+          pageContentPreview(page),
+          takeSnapshot(bm, { lean: true, maxElements: 50 }),
+        ]);
+        const text = `${page.url()}\n\n--- content ---\n${preview}\n\n--- interactive ---\n${interactive}`;
+        return { content: [{ type: 'text' as const, text }] };
       } catch (err) {
         bm.incrementFailures();
         return { content: [{ type: 'text' as const, text: wrapError(err) }], isError: true };

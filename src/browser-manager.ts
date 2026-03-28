@@ -26,6 +26,7 @@ import {
 } from './buffers.js';
 import { validateNavigationUrl } from './url-validation.js';
 import type { RefEntry } from './types.js';
+import { extensionServer, type ExtensionServer } from './extension-server.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -75,10 +76,30 @@ export class BrowserManager {
   private interceptConfigs: Map<string, { status?: number; body?: string; headers?: Record<string, string>; contentType?: string }> = new Map();
   private interceptHandlers: Map<string, (route: Route) => void> = new Map();
 
+  // ─── Extension Bridge ─────────────────────────────────────────
+  getExtension(): ExtensionServer | null {
+    return extensionServer.isConnected() ? extensionServer : null;
+  }
+
   async ensureBrowser(): Promise<void> {
+    if (extensionServer.isConnected()) {
+      if (!this._loggedExtension) {
+        const tab = extensionServer.getSessionTab();
+        console.error(`[pilot] Extension connected ✓ — using your real Chrome${tab ? ` (tab ${tab})` : ''}`);
+        this._loggedExtension = true;
+      }
+      return;
+    }
     if (this.browser && this.browser.isConnected()) return;
+    if (!this._loggedHeaded) {
+      console.error('[pilot] Extension not connected — running in headed Chromium mode');
+      console.error('[pilot] For best experience, install the extension: npx pilot-mcp --install-extension');
+      this._loggedHeaded = true;
+    }
     await this.launch();
   }
+  private _loggedExtension = false;
+  private _loggedHeaded = false;
 
   async launch(): Promise<void> {
     const isLinux = process.platform === 'linux';
@@ -86,8 +107,9 @@ export class BrowserManager {
       ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
       : [];
 
+    const headed = process.env.PILOT_HEADLESS !== '1';
     const launchOptions: Parameters<typeof chromium.launch>[0] = {
-      headless: true,
+      headless: !headed,
       ...(launchArgs.length > 0 ? { args: launchArgs } : {}),
     };
 
@@ -117,7 +139,8 @@ export class BrowserManager {
     }
 
     // Auto-restore persisted cookies
-    await this.loadPersistedState();
+    // Removed: auto-loading persisted cookies on launch.
+    // Cookies should only be restored via explicit pilot_auth({ action: "load" }).
     await this.applyRoutesFromConfig();
 
     await this.newTab();
@@ -125,8 +148,6 @@ export class BrowserManager {
 
   async close(): Promise<void> {
     if (this.browser) {
-      // Auto-persist cookies before closing
-      await this.persistState();
       this.browser.removeAllListeners('disconnected');
       await Promise.race([
         this.browser.close(),
@@ -516,6 +537,69 @@ export class BrowserManager {
       } catch {}
       return `Context recreation failed: ${err instanceof Error ? err.message : String(err)}. Browser reset to blank tab.`;
     }
+  }
+
+  // ─── CDP: Connect to real user Chrome ────────────────────────
+  private isCDP: boolean = false;
+
+  async connectCDP(port: number = 9222): Promise<string> {
+    const endpoint = `http://localhost:${port}`;
+
+    let cdpBrowser: Browser;
+    try {
+      cdpBrowser = await chromium.connectOverCDP(endpoint, { timeout: 5000 });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `ERROR: Cannot connect to Chrome on port ${port} — ${msg}.\n\nMake sure Chrome is running with:\n  --remote-debugging-port=${port}\n\nExample (macOS):\n  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --remote-debugging-port=${port}`;
+    }
+
+    // Grab the first existing context (real Chrome always has one)
+    const contexts = cdpBrowser.contexts();
+    const newContext = contexts[0] ?? await cdpBrowser.newContext();
+
+    const oldBrowser = this.browser;
+
+    this.browser = cdpBrowser;
+    this.context = newContext;
+    this.pages.clear();
+    this.isHeaded = true;
+    this.isCDP = true;
+
+    this.browser.on('disconnected', () => {
+      console.error('[pilot] CDP browser disconnected.');
+      this.browser = null;
+      this.context = null;
+      this.pages.clear();
+      this.isCDP = false;
+    });
+
+    // Map existing pages
+    const existingPages = newContext.pages();
+    if (existingPages.length > 0) {
+      for (const page of existingPages) {
+        const id = this.nextTabId++;
+        this.pages.set(id, page);
+        this.wirePageEvents(page);
+      }
+      this.activeTabId = [...this.pages.keys()][existingPages.length - 1];
+    } else {
+      await this.newTab();
+    }
+
+    this.clearRefs();
+
+    if (oldBrowser) {
+      oldBrowser.removeAllListeners('disconnected');
+      oldBrowser.close().catch(() => {});
+    }
+
+    const pageCount = this.pages.size;
+    const currentUrl = this.getCurrentUrl();
+    return `Connected to real Chrome on port ${port}. ${pageCount} tab(s) found. Active page: ${currentUrl}\nAll automation now runs in your real Chrome profile — Cloudflare will see a real user.`;
+  }
+
+  getIsCDP(): boolean {
+    return this.isCDP;
   }
 
   // ─── Handoff: Headless → Headed ─────────────────────────────

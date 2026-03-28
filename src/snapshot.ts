@@ -259,12 +259,13 @@ export async function diffSnapshot(
     rootLocator = frame.locator('body');
   }
 
-  // Take a fresh snapshot (reuses takeSnapshot logic for ref map building)
+  // Save previous snapshot BEFORE takeSnapshot overwrites it
+  const lastSnapshot = bm.getLastSnapshot();
+
+  // Take a fresh snapshot (this updates bm.lastSnapshot internally)
   const currentText = await takeSnapshot(bm, opts);
 
-  const lastSnapshot = bm.getLastSnapshot();
   if (!lastSnapshot || lastSnapshot === currentText) {
-    bm.setLastSnapshot(currentText);
     if (!lastSnapshot) {
       return currentText + '\n\n(no previous snapshot to diff against — this snapshot stored as baseline)';
     }
@@ -284,6 +285,26 @@ export async function diffSnapshot(
 
   bm.setLastSnapshot(currentText);
   return diffOutput.join('\n');
+}
+
+/**
+ * Extract readable content from the page: title + main body text.
+ * Used to enrich navigate responses so the LLM can answer read-tasks
+ * without a separate snapshot call.
+ */
+export async function pageContentPreview(page: Page): Promise<string> {
+  const [title, body] = await Promise.all([
+    page.title().catch(() => ''),
+    page.evaluate(() => {
+      const main = document.querySelector('main, [role="main"], article, #content, .content, #main');
+      const el = (main as HTMLElement) || document.body;
+      return (el.innerText || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 1500);
+    }).catch(() => ''),
+  ]);
+  const parts: string[] = [];
+  if (title) parts.push(`title: ${title}`);
+  if (body) parts.push(body);
+  return parts.join('\n\n');
 }
 
 export async function annotateScreenshot(

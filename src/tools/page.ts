@@ -82,6 +82,12 @@ export function registerPageTools(server: McpServer, bm: BrowserManager) {
     async ({ max_chars }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ links: Array<{ text: string; href: string }> }>('page_links');
+          const result = res.links.map(l => `${l.text} → ${l.href}`).join('\n');
+          return { content: [{ type: 'text' as const, text: truncate(result || '(no links found)', max_chars) }] };
+        }
         const links = await bm.getPage().evaluate(() =>
           [...document.querySelectorAll('a[href]')].map(a => ({
             text: a.textContent?.trim().slice(0, 120) || '',
@@ -110,6 +116,11 @@ Errors: None — returns empty array "[]" if no forms exist on the page.`,
     async () => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ forms: any[]; count: number }>('page_forms');
+          return { content: [{ type: 'text' as const, text: JSON.stringify(res.forms, null, 2) }] };
+        }
         const forms = await bm.getPage().evaluate(() => {
           return [...document.querySelectorAll('form')].map((form, i) => {
             const fields = [...form.querySelectorAll('input, select, textarea')].map(el => {
@@ -221,6 +232,17 @@ Errors:
     async ({ ref, property }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ visible: boolean; enabled: boolean; checked: boolean | null; focused: boolean }>('element_state', { ref });
+          const stateMap: Record<string, boolean> = {
+            visible: res.visible, hidden: !res.visible,
+            enabled: res.enabled, disabled: !res.enabled,
+            checked: res.checked ?? false, focused: res.focused,
+            editable: res.enabled && res.visible,
+          };
+          return { content: [{ type: 'text' as const, text: String(stateMap[property] ?? false) }] };
+        }
         const page = bm.getPage();
         const resolved = await bm.resolveRef(ref);
         const locator = 'locator' in resolved ? resolved.locator : page.locator(resolved.selector);
