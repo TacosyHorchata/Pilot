@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Fast browser automation MCP server for LLMs — persistent Chromium, ref-based interaction, cookie migration",
   "bin": {
-    "pilot": "dist/index.js"
+    "pilot": "dist/index.js",
+    "pilot-cli": "dist/cli/client.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -15,6 +16,7 @@
   },
   "files": [
     "dist",
+    "extension",
     "scripts/postinstall.js",
     "README.md",
     "LICENSE"
@@ -25,9 +27,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@types/ws": "^8.18.1",
     "better-sqlite3": "^11.0.0",
     "diff": "^7.0.0",
     "playwright": "^1.52.0",
+    "ws": "^8.20.0",
     "zod": "^3.25.0"
   },
   "keywords": [

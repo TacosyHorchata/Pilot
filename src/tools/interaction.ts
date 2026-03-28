@@ -41,6 +41,13 @@ Errors:
     async ({ ref, button, double_click }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('click', { ref, button, double_click });
+          bm.resetFailures();
+          const snap = await ext.send<{ text: string }>('snapshot', { maxElements: 20 });
+          return { content: [{ type: 'text' as const, text: `Clicked ${ref}\n--- page state ---\n${snap.text}` }] };
+        }
         const page = bm.getPage();
 
         // Auto-route: if ref points to a <option>, use selectOption
@@ -105,6 +112,12 @@ Errors:
     async ({ ref }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('hover', { ref });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Hovered ${ref}` }] };
+        }
         const resolved = await bm.resolveRef(ref);
         if ('locator' in resolved) {
           await resolved.locator.hover({ timeout: 5000 });
@@ -142,6 +155,12 @@ Errors:
     async ({ ref, value }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('fill', { ref, value });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Filled ${ref}` }] };
+        }
         const resolved = await bm.resolveRef(ref);
         if ('locator' in resolved) {
           await resolved.locator.fill(value, { timeout: 5000 });
@@ -179,6 +198,12 @@ Errors:
     async ({ ref, value }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ selected: string; value: string }>('select_option', { ref, label: value });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Selected "${res.selected}" in ${ref}` }] };
+        }
         const resolved = await bm.resolveRef(ref);
         if ('locator' in resolved) {
           await resolved.locator.selectOption(value, { timeout: 5000 });
@@ -216,6 +241,13 @@ Errors:
     async ({ text, submit }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('type', { text });
+          if (submit) await ext.send('press', { key: 'Enter' });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Typed ${text.length} characters${submit ? ' + Enter' : ''}` }] };
+        }
         const page = bm.getPage();
         await page.keyboard.type(text);
         if (submit) await page.keyboard.press('Enter');
@@ -244,6 +276,12 @@ Errors:
     async ({ key }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('press', { key });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Pressed ${key}` }] };
+        }
         await bm.getPage().keyboard.press(key);
         bm.resetFailures();
         return { content: [{ type: 'text' as const, text: `Pressed ${key}` }] };
@@ -313,6 +351,19 @@ Errors:
     async ({ ref, direction }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const scrollMap: Record<string, { deltaX: number; deltaY: number }> = {
+            up: { deltaX: 0, deltaY: -300 },
+            down: { deltaX: 0, deltaY: 300 },
+            top: { deltaX: 0, deltaY: -99999 },
+            bottom: { deltaX: 0, deltaY: 99999 },
+          };
+          const delta = ref ? { ref } : scrollMap[direction || 'down'];
+          await ext.send('scroll', delta);
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Scrolled ${ref || direction || 'down'}` }] };
+        }
         const page = bm.getPage();
         if (ref) {
           const resolved = await bm.resolveRef(ref);
@@ -363,9 +414,14 @@ Errors:
     async ({ ref, state, timeout }) => {
       await bm.ensureBrowser();
       try {
-        const page = bm.getPage();
+        const ext = bm.getExtension();
         const ms = timeout || 15000;
-
+        if (ext && ref && (!state || state === 'visible')) {
+          await ext.send('wait', { selector: ref.startsWith('@') ? `[data-pilot-ref="${ref.slice(1)}"]` : ref, timeout: ms });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Element ${ref} is visible` }] };
+        }
+        const page = bm.getPage();
         if (state === 'networkidle') {
           await page.waitForLoadState('networkidle', { timeout: ms });
           return { content: [{ type: 'text' as const, text: 'Network idle' }] };

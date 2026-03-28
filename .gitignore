@@ -6,6 +6,8 @@ dist/
 .mcp.json
 CLAUDE.md
 .gstack/
+.claude/
+.playwright-cli/
 assets/
 docs/
 benchmark.js

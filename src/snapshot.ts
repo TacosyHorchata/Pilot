@@ -286,6 +286,26 @@ export async function diffSnapshot(
   return diffOutput.join('\n');
 }
 
+/**
+ * Extract readable content from the page: title + main body text.
+ * Used to enrich navigate responses so the LLM can answer read-tasks
+ * without a separate snapshot call.
+ */
+export async function pageContentPreview(page: Page): Promise<string> {
+  const [title, body] = await Promise.all([
+    page.title().catch(() => ''),
+    page.evaluate(() => {
+      const main = document.querySelector('main, [role="main"], article, #content, .content, #main');
+      const el = (main as HTMLElement) || document.body;
+      return (el.innerText || '').replace(/\n{3,}/g, '\n\n').trim().slice(0, 1500);
+    }).catch(() => ''),
+  ]);
+  const parts: string[] = [];
+  if (title) parts.push(`title: ${title}`);
+  if (body) parts.push(body);
+  return parts.join('\n\n');
+}
+
 export async function annotateScreenshot(
   bm: BrowserManager,
   outputPath?: string

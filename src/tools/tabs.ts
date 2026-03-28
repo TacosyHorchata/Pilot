@@ -18,6 +18,14 @@ Errors: None — returns empty list if no tabs exist (unlikely in normal operati
     async () => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ tabs: Array<{ tabId: number; url: string; title: string; active: boolean }> }>('tabs');
+          const text = res.tabs.map(t =>
+            `${t.active ? '→ ' : '  '}[${t.tabId}] ${t.title || '(untitled)'} — ${t.url}`
+          ).join('\n');
+          return { content: [{ type: 'text' as const, text }] };
+        }
         const tabs = await bm.getTabListWithTitles();
         const text = tabs.map(t =>
           `${t.active ? '→ ' : '  '}[${t.id}] ${t.title || '(untitled)'} — ${t.url}`
@@ -45,6 +53,11 @@ Errors:
     async ({ url }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await ext.send<{ tabId: number }>('new_tab', { url });
+          return { content: [{ type: 'text' as const, text: `Opened tab ${res.tabId}${url ? ` → ${url}` : ''}` }] };
+        }
         const id = await bm.newTab(url);
         return { content: [{ type: 'text' as const, text: `Opened tab ${id}${url ? ` → ${url}` : ''}` }] };
       } catch (err) {
@@ -70,6 +83,11 @@ Errors:
     async ({ id }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('close_tab', { tabId: id });
+          return { content: [{ type: 'text' as const, text: `Closed tab${id ? ` ${id}` : ''}` }] };
+        }
         await bm.closeTab(id);
         return { content: [{ type: 'text' as const, text: `Closed tab${id ? ` ${id}` : ''}` }] };
       } catch (err) {
@@ -94,6 +112,11 @@ Errors:
     async ({ id }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          await ext.send('switch_tab', { tabId: id });
+          return { content: [{ type: 'text' as const, text: `Switched to tab ${id}` }] };
+        }
         bm.switchTab(id);
         return { content: [{ type: 'text' as const, text: `Switched to tab ${id}` }] };
       } catch (err) {
