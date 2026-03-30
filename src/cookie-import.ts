@@ -175,9 +175,8 @@ export async function importCookies(
   browserName: string,
   domains: string[],
   profile = 'Default',
+  maxCookies = 0,
 ): Promise<ImportResult> {
-  if (domains.length === 0) return { cookies: [], count: 0, failed: 0, domainCounts: {} };
-
   const browser = resolveBrowser(browserName);
   const match = getBrowserMatch(browser, profile);
   const derivedKeys = await getDerivedKeys(match);
@@ -185,16 +184,32 @@ export async function importCookies(
 
   try {
     const now = chromiumNow();
-    const placeholders = domains.map(() => '?').join(',');
-    const stmt = db.prepare(
-      `SELECT host_key, name, value, encrypted_value, path, expires_utc,
-              is_secure, is_httponly, has_expires, samesite
-       FROM cookies
-       WHERE host_key IN (${placeholders})
-         AND (has_expires = 0 OR expires_utc > ?)
-       ORDER BY host_key, name`
-    );
-    const rows = stmt.all(...domains, now.toString()) as RawCookie[];
+    let rows: RawCookie[];
+
+    if (domains.length > 0) {
+      const placeholders = domains.map(() => '?').join(',');
+      const stmt = db.prepare(
+        `SELECT host_key, name, value, encrypted_value, path, expires_utc,
+                is_secure, is_httponly, has_expires, samesite
+         FROM cookies
+         WHERE host_key IN (${placeholders})
+           AND (has_expires = 0 OR expires_utc > ?)
+         ORDER BY host_key, name`
+      );
+      rows = stmt.all(...domains, now.toString()) as RawCookie[];
+    } else {
+      // Import ALL non-expired cookies
+      const limit = maxCookies > 0 ? maxCookies : 500;
+      const stmt = db.prepare(
+        `SELECT host_key, name, value, encrypted_value, path, expires_utc,
+                is_secure, is_httponly, has_expires, samesite
+         FROM cookies
+         WHERE (has_expires = 0 OR expires_utc > ?)
+         ORDER BY expires_utc DESC
+         LIMIT ?`
+      );
+      rows = stmt.all(now.toString(), limit) as RawCookie[];
+    }
 
     const cookies: PlaywrightCookie[] = [];
     let failed = 0;

@@ -83,6 +83,18 @@ Errors:
     async ({ ref, full_page, output_path, clip }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await bm.extSend<{ data: string; mimeType: string }>('screenshot');
+          const screenshotPath = output_path ? validateOutputPath(output_path) : path.join(TEMP_DIR, 'pilot-screenshot.png');
+          fs.writeFileSync(screenshotPath, Buffer.from(res.data, 'base64'));
+          return {
+            content: [
+              { type: 'text' as const, text: `Screenshot saved: ${screenshotPath}` },
+              { type: 'image' as const, data: res.data, mimeType: 'image/png' },
+            ],
+          };
+        }
         const page = bm.getPage();
         const screenshotPath = output_path ? validateOutputPath(output_path) : path.join(TEMP_DIR, 'pilot-screenshot.png');
 

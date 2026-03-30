@@ -16,25 +16,62 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { BrowserManager } from './browser-manager.js';
 import { registerAllTools, type ToolProfile } from './tools/register.js';
+import { extensionServer } from './extension-server.js';
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { fileURLToPath } from 'url';
+
+// ─── CLI: --install-extension ────────────────────────────────
+if (process.argv.includes('--install-extension')) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const extDir = path.resolve(__dirname, '..', 'extension');
+  if (!fs.existsSync(extDir)) {
+    console.error(`Extension folder not found at ${extDir}`);
+    process.exit(1);
+  }
+  console.log(`\nPilot Chrome Extension`);
+  console.log(`─────────────────────`);
+  console.log(`Extension folder: ${extDir}\n`);
+  console.log(`To install:`);
+  console.log(`  1. Open Chrome → chrome://extensions`);
+  console.log(`  2. Enable Developer Mode (top right)`);
+  console.log(`  3. Click "Load unpacked" → select the folder above\n`);
+  // Try to open chrome://extensions automatically
+  try {
+    if (process.platform === 'darwin') execSync('open "chrome://extensions"', { stdio: 'ignore' });
+    else if (process.platform === 'linux') execSync('xdg-open "chrome://extensions"', { stdio: 'ignore' });
+    console.log(`Chrome extensions page opened. Paste this path:\n${extDir}\n`);
+  } catch {
+    console.log(`Open chrome://extensions manually and load the folder above.\n`);
+  }
+  process.exit(0);
+}
 
 const server = new McpServer({
   name: 'pilot',
-  version: '0.2.0',
+  version: '0.3.0',
 });
 
 const browserManager = new BrowserManager();
 
-let profile: ToolProfile = (process.env.PILOT_PROFILE || 'full') as ToolProfile;
+let profile: ToolProfile = (process.env.PILOT_PROFILE || 'standard') as ToolProfile;
 if (!['core', 'standard', 'full'].includes(profile)) {
-  console.error(`[pilot] Invalid PILOT_PROFILE="${profile}". Use: core (9 tools), standard (25 tools), full (all tools). Defaulting to full.`);
-  profile = 'full';
+  console.error(`[pilot] Invalid PILOT_PROFILE="${profile}". Use: core (9 tools), standard (30 tools), full (all tools). Defaulting to standard.`);
+  profile = 'standard';
 }
 registerAllTools(server, browserManager, profile);
 
 async function main() {
+  extensionServer.start();
+  extensionServer.onStateChange((connected) => {
+    if (!connected) {
+      // Reset log flags so next ensureBrowser() re-detects mode
+      (browserManager as any)._loggedExtension = false;
+      (browserManager as any)._loggedHeaded = false;
+    }
+  });
   // One-time star reminder on first run
   const markerPath = path.join(os.homedir(), '.pilot-welcomed');
   if (!fs.existsSync(markerPath)) {
@@ -51,6 +88,7 @@ async function main() {
 // Graceful shutdown
 async function shutdown() {
   console.error('[pilot] Shutting down...');
+  extensionServer.stop();
   await browserManager.close();
   process.exit(0);
 }

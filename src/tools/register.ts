@@ -31,12 +31,12 @@ const CORE_TOOLS = new Set([
 ]);
 
 /**
- * standard (28 tools) — common automation needs without inspection overhead.
+ * standard (30 tools) — common automation needs without inspection overhead.
  */
 const STANDARD_TOOLS = new Set([
   ...CORE_TOOLS,
   // navigation
-  'pilot_back', 'pilot_forward', 'pilot_reload',
+  'pilot_back', 'pilot_forward', 'pilot_reload', 'pilot_get',
   // interaction
   'pilot_hover', 'pilot_select_option', 'pilot_scroll', 'pilot_drag',
   // tabs

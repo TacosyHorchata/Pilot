@@ -5,6 +5,9 @@ import { takeSnapshot, diffSnapshot, annotateScreenshot } from '../snapshot.js';
 import { wrapError } from '../errors.js';
 import { validateOutputPath } from './visual.js';
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 export function registerSnapshotTools(server: McpServer, bm: BrowserManager) {
   server.tool(
@@ -20,8 +23,10 @@ Parameters:
 - include_cursor_interactive: Set to true to scan for elements with cursor:pointer, onclick, or tabindex that are not in the ARIA tree — returns @cN refs
 - max_elements: Maximum elements to include before truncating (saves tokens on very large pages)
 - structure_only: Set to true to show tree structure without text content — saves tokens when you only need the element hierarchy
+- output_file: Set to true to save the snapshot to a temp file instead of returning inline. Returns the file path — read with the Read tool when needed. Useful when the snapshot is large and you only need it on demand.
 
 Returns: Text representation of the accessibility tree with @eN refs (and @cN refs if include_cursor_interactive is true).
+If output_file=true: returns only the file path (e.g. /tmp/pilot-snap-abc123.txt).
 
 Errors:
 - Timeout: The page is too complex or unresponsive. Try scoping with selector or using max_elements.`,
@@ -35,10 +40,23 @@ Errors:
       structure_only: z.boolean().optional().describe('Show tree structure without text content — saves tokens'),
       lean: z.boolean().optional().default(true).describe('Strip structural noise (empty rows/cells, separator text, duplicate labels). Default: true. Set false for raw ARIA tree.'),
       verbose: z.boolean().optional().describe('Alias for lean=false. Returns full ARIA tree with all structural nodes.'),
+      output_file: z.boolean().optional().describe('Save snapshot to a temp file and return only the file path. Read with the Read tool when needed.'),
     },
-    async ({ selector, interactive_only, compact, depth, include_cursor_interactive, max_elements, structure_only, lean, verbose }) => {
+    async ({ selector, interactive_only, compact, depth, include_cursor_interactive, max_elements, structure_only, lean, verbose, output_file }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await bm.extSend<{ text: string; url: string; title: string; count: number }>('snapshot', {
+            maxElements: max_elements ?? 200,
+            interactive_only: interactive_only ?? false,
+            structure_only: structure_only ?? false,
+            lean: verbose ? false : (lean !== false),
+            maxDepth: depth,
+          });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `[extension] ${res.title} — ${res.url}\n${res.text}` }] };
+        }
         const result = await takeSnapshot(bm, {
           selector,
           interactive: interactive_only,
@@ -50,6 +68,11 @@ Errors:
           lean: verbose ? false : (lean !== false),
         });
         bm.resetFailures();
+        if (output_file) {
+          const snapPath = path.join(os.tmpdir(), `pilot-snap-${crypto.randomBytes(6).toString('hex')}.txt`);
+          fs.writeFileSync(snapPath, result, 'utf8');
+          return { content: [{ type: 'text' as const, text: snapPath }] };
+        }
         return { content: [{ type: 'text' as const, text: result }] };
       } catch (err) {
         bm.incrementFailures();
@@ -121,6 +144,12 @@ Errors:
     async ({ text, label, placeholder, role, exact }) => {
       await bm.ensureBrowser();
       try {
+        const ext = bm.getExtension();
+        if (ext) {
+          const res = await bm.extSend<{ ref: string; tag: string; text: string }>('find', { text, label, role, placeholder });
+          bm.resetFailures();
+          return { content: [{ type: 'text' as const, text: `Found ${res.ref} [${res.tag}] "${res.text}"` }] };
+        }
         const frame = bm.getActiveFrame();
         const exactMatch = exact ?? false;
 
